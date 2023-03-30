@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">Home</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                <li class="nav-item">
+                <a class="nav-link active" aria-current="page" href="/">All products</a>
+                </li>
+                <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    Brands
+                </a>
+                <ul class="dropdown-menu">
+                    {% for brand in brands %}
+                        <a class="dropdown-item" href="{{url_for('get_brand', id=brand.id)}}"> {{brand.name}}</a>
+                    {% endfor %}
+                </ul>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Categories
+                    </a>
+                    <ul class="dropdown-menu">
+                        {% for category in categories %}
+                            <a class="dropdown-item" href="{{url_for('get_category', id=category.id)}}"> {{category.name}}</a>
+                        {% endfor %}
+                    </ul>
+                </li>
+
+                <li class="nav-item">
+                    <a href="" class="nav-link"> Cart ({{ session['Shoppingcart']|length }}) </a>
+                </li>
+            </ul>
+            <form class="d-flex" role="search">
+                <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search">
+                <button class="btn btn-outline-success" type="submit">Search</button>
+            </form>
+            </div>
+        </div>
+    </nav>
+</div>
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-md-6" id="b_image">
+            <img src="{{url_for('static',filename='images/'+product.image_1)}}" alt="{{product.name}}" width="400" height="400">
+        </div>
+        <div class="col-md-6">
+            <h4> Product name: {{product.name}}</h4>
+            <p> Product price: ${{product.price}} </p>
+            {% if product.discount >0 %}
+            <p> Product Discount: {{ product.discount}} %</p>
+            {%endif %}
+            <p> {{product.desc}}</p>
+            <form action="{{url_for('AddCart')}}" method="post">
+                <input type="hidden" name="product_id" value="{{product.id}}">
+                <button type="submit" class="btn btn-sm btn-warning"> Add cart</button>
+                <label for=""> Quantity:</label>
+                <input type="number" name="quantity" id="" value="1" min="1" max="{{product.stock}}">
+                {% set colors = product.colors.split(',') %}
+                <label for="colors"> Colors:</label>
+                <select name="colors" id="">
+                    {% for color in colors %}
+                    {% set col = color.split(':') %}
+                    <option value="{{col[0]}}">{{col[0]|capitalize}}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-12" id="s_image">
+            <img src="{{url_for('static',filename='images/' + product.image_1)}}" alt="{{product.name}}" width="120" height="120" class="p-3">
+            <img src="{{url_for('static',filename='images/' + product.image_2)}}" alt="{{product.name}}" width="120" height="120" class="p-3">
+            <img src="{{url_for('static',filename='images/' + product.image_3)}}" alt="{{product.name}}" width="120" height="120" class="p-3">
+        </div>
+    </div>
+    <script>
+        var b_image = document.getElementById('b_image');
+        var s_image = document.getElementById('s_image').getElementsByTagName('img');
+        for (var i = 0; i < s_image.length; i++){
+            s_image[i].addEventListener('click', full_image);
+        }
+
+        function full_image(){
+            var ImageSRC = this.getAttribute('src');
+            b_image.innerHTML = "<img src=" + ImageSRC+" width='400' height='400'>" ;
+        }
+    </script>
+</div>
+
+{% endblock content %}
