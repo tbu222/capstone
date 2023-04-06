@@ -1,12 +1,19 @@
 import os
-
+from flask_bcrypt import Bcrypt
 from flask import Flask, render_template, request, flash, redirect, session, g, abort, url_for, current_app
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 from flask_uploads import IMAGES, UploadSet, configure_uploads, patch_request_class
-from forms import UserAddForm, UserEditForm, LoginForm, ProductAddForm
-from models import db, connect_db, User, Brand, Category, Addproduct
+from forms import UserAddForm, UserEditForm, LoginForm, ProductAddForm, CustomerRegisterForm, CustomerLoginForm
+from models import db, connect_db, User, Brand, Category, Addproduct, Register, CustomerOrder
 import secrets
+from flask_msearch import Search
+import stripe
+
+publishable_key = 'pk_test_51Mu24DEWnuVoOV60khONQ6e9OJdzmn13ippXLRDHhIfbFB3uAgfP150YHsUhUSErujgw3AxZX0qt7wK8DH5Lr6wc00iVAzJZvK'
+
+stripe.api_key = 'sk_test_51Mu24DEWnuVoOV60cTgYRZEh72I4XsrlBsJMnFbcwFgDkCE4rFwzPUygIFsEuXpPvV9OCqPuvly6Pgo5gx5TiqzD00a6j9djCh'
+
 CURR_USER_KEY = "curr_user"
 
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -24,10 +31,21 @@ photos = UploadSet('photos', IMAGES)
 configure_uploads(app, photos)
 patch_request_class(app)   
 toolbar = DebugToolbarExtension(app)
+search = Search(db=db)
+search.init_app(app)
+bcrypt = Bcrypt()
+
 
 connect_db(app)
 db.create_all()
 
+# def brands():
+#     brands = Brand.query.join(Addproduct,(Brand.id == Addproduct.brand_id)).all()
+#     return brands
+
+# def categories():
+#     categories = Category.query.join(Addproduct, (Category.id == Addproduct.category_id)).all()
+#     return categories
 ##############################################################################
 # User signup/login/logout
 
@@ -45,6 +63,7 @@ def do_login(user):
     """Log in user."""
 
     session[CURR_USER_KEY] = user.id
+
 
 def do_logout():
     """Logout user."""
@@ -345,11 +364,13 @@ def AddCart():
         colors=request.form.get('colors')
         product= Addproduct.query.filter_by(id=product_id).first()
         if product_id and quantity and colors and request.method == "POST":
-            DictItems = {product_id:{'name': product.name, 'price':float(product.price), 'discount': product.discount, 'color': colors, 'quantity': quantity, 'image': product.image_1}}
-            session["Shoppingcart"] = MergeDicts(session["Shoppingcart"], DictItems)
+            DictItems = {product_id:{'name': product.name, 'price':float(product.price), 'discount': product.discount, 'color': colors, 'quantity': quantity, 'image': product.image_1, 'colors':product.colors}}         
             if "Shoppingcart" in session:
-                if product_id in session["Shoppingcart"]:
-                    print("This product already in the cart")
+                if product_id in session['Shoppingcart']:
+                    for key,item in session['Shoppingcart'].items():
+                        if int(key) == int(product_id):
+                            session.modified = True
+                            item['quantity'] +=1
                 else:
                     session["Shoppingcart"] = MergeDicts(session["Shoppingcart"], DictItems)
                     return redirect(request.referrer)
@@ -360,6 +381,72 @@ def AddCart():
         print(e)
     finally:
         return redirect(request.referrer)
+
+@app.route('/carts')
+def getCart():
+    if 'Shoppingcart' not in session or len(session['Shoppingcart']) <=0:
+        return redirect(url_for('homepage'))
+    subtotal = 0
+    grandtotal = 0
+    brands = Brand.query.join(Addproduct,(Brand.id == Addproduct.brand_id)).all()
+    categories = Category.query.join(Addproduct, (Category.id == Addproduct.category_id)).all()
+    for key, product in session['Shoppingcart'].items():
+        discount=(product['discount']/100 * float(product['price']) *int(product['quantity'])) 
+        subtotal += float(product['price']) * int(product['quantity'])
+        subtotal -= discount
+        tax = ("%.2f" % (.06 * float(subtotal)))
+        grandtotal = float("%.2f"% (1.06 * subtotal))
+    return render_template('products/carts.html', tax = tax, grandtotal = grandtotal, brands=brands, categories=categories)
+
+@app.route('/empty')
+def empty_cart():
+    try:
+        session.clear()
+        return redirect(url_for('homepage'))
+    except Exception as e:
+        print(e)
+
+@app.route('/clearcart')
+def clearcart():
+    try:
+        session.pop('Shoppingcart', None)
+        return redirect(url_for('homepage'))
+    except Exception as e:
+        print(e)
+@app.route('/updatecart/<int:code>', methods=['POST'])
+def updatecart(code):
+    if 'Shoppingcart' not in session or len(session['Shoppingcart']) <= 0:    
+        return redirect(url_for('homepage'))
+    if request.method == "POST":
+        quantity = request.form.get('quantity')
+        color = request.form.get('color')
+        try:
+            session.modified = True
+            for key, item in session['Shoppingcart'].items():
+                if int(key) == code:
+                    item['quantity'] = quantity
+                    item['color'] = color
+                    flash('Item is updated!')
+                    return redirect(url_for('getCart'))
+        except Exception as e:
+            print(e)
+            return redirect(url_for('getCart'))
+
+@app.route('/deleteitem/<int:id>')
+def deleteitem(id):
+    if 'Shoppingcart' not in session or len(session['Shoppingcart']) <= 0:
+        return redirect(url_for('homepage'))
+    try:
+        session.modified = True
+        for key, item in session['Shoppingcart'].items():
+            if int(key) == id:
+                print(key)
+                session['Shoppingcart'].pop(key, None)
+                print(session['Shoppingcart'])
+                return redirect(url_for('getCart'))
+    except Exception as e:
+        print(e)
+        return redirect(url_for('getCart'))
 ##############################################################################
 # Homepage and error pages
 
@@ -387,7 +474,6 @@ def homepage():
     - logged in: 100 most recent messages of followed_users
     """
     page = request.args.get('page', 1, type=int)
-
     products = Addproduct.query.filter(Addproduct.stock > 0).order_by(Addproduct.id.desc()).paginate(page=page, per_page=4)
     brands = Brand.query.join(Addproduct,(Brand.id == Addproduct.brand_id)).all()
     categories = Category.query.join(Addproduct, (Category.id == Addproduct.category_id)).all()
@@ -398,14 +484,70 @@ def page_not_found(e):
     """404 NOT FOUND page."""
 
     return render_template('404.html'), 404
+##############################################################################
+#search
+@app.route('/result')
+def result():
+    searchword = request.args.get('q')
+    products = Addproduct.query.msearch(searchword, fields=['name', 'desc'], limit=6)
+    brands = Brand.query.join(Addproduct,(Brand.id == Addproduct.brand_id)).all()
+    categories = Category.query.join(Addproduct, (Category.id == Addproduct.category_id)).all()
+    return render_template('products/result.html', products=products, brands = brands, categories =categories)
 
 
+##############################################################################
+#customer register
+# @app.route('/customer/register', methods=['GET', 'POST'])
+# def customer_register():
+#     form = CustomerRegisterForm()
+#     if form.validate_on_submit():
+#         hash_password = bcrypt.generate_password_hash(form.password.data)
+#         register = Register(name=form.name.data, username= form.username.data, email=form.email.data, password = hash_password, country= form.country.data, state= form.state.data, city=form.city.data, address=form.address.data,zipcode=form.zipcode.data)
+#         db.session.add(register)
+#         flash('Welcome {form.name.data} to Market', 'success')
+#         db.session.commit()
+#         return redirect("/login")
+#     return render_template('customers/register.html', form=form)
+
+# @app.route('/customer/login', methods=['GET', 'POST'])
+# def customerLogin():
+#     form = CustomerLoginForm()
+#     if form.validate_on_submit():
+#         user = Register.query.filter_by(email=form.email.data).first()
+#         if user and bcrypt.check_password_hash(user.password, form.password.data):
+#             login_user(user)
+#             flash('You are login now', 'success')
+#             next = request.args.get('next')
+#             return redirect(next or url_for('homepage'))
+#         flash('incorrect email or password')
+#         return redirect(url_for('customerLogin'))
+#     return render_template('customers/login.html', form=form)
 ##############################################################################
 # Turn off all caching in Flask
 #   (useful for dev; in production, this kind of stuff is typically
 #   handled elsewhere)
 #
 # https://stackoverflow.com/questions/34066804/disabling-caching-in-flask
+
+@app.route('/getorder')
+def get_order():
+    if g.user:
+        customer_id = g.user.id
+        invoice = secrets.token_hex(5)
+        try:
+            order = CustomerOrder(invoice=invoice, customer_id=customer_id, orders=session['Shoppingcart'])
+            db.session.add(order)
+            db.session.commit()
+            session.pop('Shoppingcart')
+            flash('Your order has been updated','success')
+            return redirect(url_for('orders',invoice = invoice))
+        except Exception as e:
+            print(e)
+            flash('404', 'danger')
+            return redirect(url_for('getCart'))
+
+    else:
+        return render_template('home-anon.html')
 @app.after_request
 def add_header(req):
     """Add non-caching headers on every request."""
@@ -416,3 +558,45 @@ def add_header(req):
     req.headers['Cache-Control'] = 'public, max-age=0'
     return req
 
+@app.route('/orders/<invoice>')
+def orders(invoice):
+    if g.user:
+        grandTotal = 0
+        subTotal = 0
+        customer_id = g.user.id
+        customer = User.query.filter_by(id=customer_id).first()
+        orders = CustomerOrder.query.filter_by(customer_id=customer_id).order_by(CustomerOrder.id.desc()).first()
+        for _key, product in orders.orders.items():
+            discount = (product['discount']/100 * float(product['price']) *int(product['quantity'])) 
+            subTotal += float(product['price']) * int(product['quantity'])
+            subTotal -= discount
+            tax = ("%.2f" % (.06 * float(subTotal)))
+            grandTotal = ("%.2f"% (1.06 * float(subTotal)))
+    else:
+        return render_template('home-anon.html')
+    return render_template('customers/order.html', invoice=invoice, tax= tax, subTotal = subTotal, grandTotal=grandTotal, customer=customer, orders=orders)
+
+@app.route('/payment', methods=['POST'])
+def payment():
+    invoice = request.form.get('invoice')
+    amount = request.form.get('amount')
+    customer = stripe.Customer.create(
+        email=request.form['stripeEmail'],
+        source=request.form['stripeToken'],
+    )
+
+    charge = stripe.Charge.create(
+        customer=customer.id,
+        description='Market',
+        amount=amount,
+        currency='usd',
+    )
+    orders = CustomerOrder.query.filter_by(customer_id=g.user.id).order_by(CustomerOrder.id.desc()).first()
+    orders.status = 'Paid'
+    db.session.commit()
+    return redirect(url_for('thanks'))
+
+
+@app.route('/thanks')
+def thanks():
+    return render_template('customers/thanks.html')

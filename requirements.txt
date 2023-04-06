@@ -12,6 +12,8 @@ Flask-DebugToolbar==0.10.1
 Flask-SQLAlchemy==2.3.2
 Flask-WTF==0.14.2
 Flask-Uploads==0.2.1
+Flask-Msearch==0.2.5
+Flask-Migrate==2.5.3
 ipython==7.0.1
 ipython-genutils==0.2.0
 itsdangerous==0.24
